@@ -14,80 +14,87 @@ namespace Boissonnot.Framework.Core.WebServices.Soap.SoapWithAttachments
 {
     public class SwaEncoder : MessageEncoder
     {
-        private string _ContentType;
-        private string _MediaType;
+        #region Fields
+        private string _contentType;
+        private string _mediaType;
 
-        protected MimeContent _MyContent;
-        protected MimePart _SoapMimeContent;
-        protected MimePart _AttachmentMimeContent;
+        protected MimeContent _myContent;
+        protected MimePart _soapMimeContent;
+        protected MimePart _attachmentMimeContent;
 
-        protected readonly MimeParser _MimeParser;
-        protected readonly SwaEncoderFactory _Factory;
-        protected readonly MessageEncoder _InnerEncoder;
+        protected readonly MimeParser _mimeParser;
+        protected readonly SwaEncoderFactory _factory;
+        protected readonly MessageEncoder _innerEncoder;
+        #endregion
 
+        #region Constructors
         public SwaEncoder(MessageEncoder innerEncoder, SwaEncoderFactory factory)
         {
             //
             // Initialize general fields
             //
-            _ContentType = "multipart/related";
-            _MediaType = _ContentType;
+            _contentType = "multipart/related";
+            _mediaType = _contentType;
 
             //
             // Create owned objects
             //
-            _Factory = factory;
-            _InnerEncoder = innerEncoder;
-            _MimeParser = new MimeParser();
+            _factory = factory;
+            _innerEncoder = innerEncoder;
+            _mimeParser = new MimeParser();
 
             //
             // Create object for the mime content message
             // 
-            _SoapMimeContent = new MimePart()
+            _soapMimeContent = new MimePart()
             {
                 ContentType = "text/xml",
                 ContentId = "<EFD659EE6BD5F31EA7BC0D59403AF049>",   // TODO: make content id dynamic or configurable?
                 CharSet = "UTF-8",                                  // TODO: make charset configurable?
                 TransferEncoding = "binary"                         // TODO: make transfer-encoding configurable?
             };
-            _AttachmentMimeContent = new MimePart()
+            _attachmentMimeContent = new MimePart()
             {
                 ContentType = "application/zip",                    // TODO: AttachmentMimeContent.ContentType configurable?
                 ContentId = "<UZE_26123_>",                         // TODO: AttachmentMimeContent.ContentId configurable/dynamic?
                 TransferEncoding = "binary"                         // TODO: AttachmentMimeContent.TransferEncoding dynamic/configurable?
             };
-            _MyContent = new MimeContent()
+            _myContent = new MimeContent()
             {
                 Boundary = "------=_Part_0_21714745.1249640163820"  // TODO: MimeContent.Boundary configurable/dynamic?
             };
-            _MyContent.Parts.Add(_SoapMimeContent);
-            _MyContent.Parts.Add(_AttachmentMimeContent);
-            _MyContent.SetAsStartPart(_SoapMimeContent);
+            _myContent.Parts.Add(_soapMimeContent);
+            _myContent.Parts.Add(_attachmentMimeContent);
+            _myContent.SetAsStartPart(_soapMimeContent);
         }
+        #endregion
 
+        #region Properties
         public override string ContentType
         {
             get
             {
                 VerifyOperationContext();
 
-                if (OperationContext.Current.OutgoingMessageProperties.ContainsKey(SwaEncoderConstants.AttachmentProperty))
-                    return _MyContent.ContentType;
+                if (OperationContext.Current.OutgoingMessageProperties.ContainsKey(SwaEncoderConstants.ATTACHMENT_PROPERTY))
+                    return _myContent.ContentType;
                 else
-                    return _InnerEncoder.ContentType;
+                    return _innerEncoder.ContentType;
             }
         }
 
         public override string MediaType
         {
-            get { return _MediaType; }
+            get { return _mediaType; }
         }
 
         public override MessageVersion MessageVersion
         {
             get { return MessageVersion.Soap11; }
         }
+        #endregion
 
+        #region Public methods
         public override bool IsContentTypeSupported(string contentType)
         {
             if (contentType.ToLower().StartsWith("multipart/related"))
@@ -105,52 +112,55 @@ namespace Boissonnot.Framework.Core.WebServices.Soap.SoapWithAttachments
             //
             // Verify the content type
             //
-            byte[] MsgContents = new byte[buffer.Count];
-            Array.Copy(buffer.Array, buffer.Offset, MsgContents, 0, MsgContents.Length);
+            byte[] msgContents = new byte[buffer.Count];
+            Array.Copy(buffer.Array, buffer.Offset, msgContents, 0, msgContents.Length);
             bufferManager.ReturnBuffer(buffer.Array);
+
+            string contents = Encoding.UTF8.GetString(msgContents);
 
             // Debug code
 #if DEBUG
-            string Contents = Encoding.UTF8.GetString(MsgContents);
             Debug.WriteLine("-------------------");
-            Debug.WriteLine(Contents);
+            Debug.WriteLine(contents);
             Debug.WriteLine("-------------------");
 #endif
 
-            MemoryStream ms = new MemoryStream(MsgContents);
-            return ReadMessage(ms, int.MaxValue, contentType);
+            MemoryStream ms = new MemoryStream(msgContents);
+            Message message = ReadMessage(ms, int.MaxValue, contentType);
+
+            message.Properties.Add(SwaEncoderConstants.CONTENTASSTRING_PROPERTY, contents);
+
+            return message;
         }
 
         public override Message ReadMessage(System.IO.Stream stream, int maxSizeOfHeaders, string contentType)
         {
+            Message message = Message.CreateMessage(MessageVersion, string.Empty);
+
             VerifyOperationContext();
 
             if (contentType.ToLower().StartsWith("multipart/related"))
             {
-                byte[] ContentBytes = new byte[stream.Length];
-                stream.Read(ContentBytes, 0, ContentBytes.Length);
-                MimeContent Content = _MimeParser.DeserializeMimeContent(contentType, ContentBytes);
+                byte[] contentBytes = new byte[stream.Length];
+                stream.Read(contentBytes, 0, contentBytes.Length);
+                MimeContent content = _mimeParser.DeserializeMimeContent(contentType, contentBytes);
 
-                if (Content.Parts.Count >= 1)
+                if (content.Parts.Count >= 1)
                 {
-                    MemoryStream ms = new MemoryStream(Content.Parts[0].Content);
-                    Message Msg = ReadMessage(ms, int.MaxValue, Content.Parts[0].ContentType);
-                    Msg.Properties.Add(SwaEncoderConstants.AttachmentProperty, Content.Parts[0].Content);
-                    return Msg;
-                }
-                else
-                {
-                    throw new ApplicationException("Invalid mime message sent! Soap with attachments makes sense, only, with at least 2 mime message content parts!");
+                    MemoryStream ms = new MemoryStream(content.Parts[0].Content);
+                    Message msg = ReadMessage(ms, int.MaxValue, content.Parts[0].ContentType);
+                    msg.Properties.Add(SwaEncoderConstants.ATTACHMENT_PROPERTY, content.Parts[0].Content);
+                    message = msg;
                 }
             }
             else if (contentType.ToLower().StartsWith("text/xml"))
             {
-                XmlReader Reader = XmlReader.Create(stream);
-                return Message.CreateMessage(Reader, maxSizeOfHeaders, MessageVersion);
+                XmlReader reader = XmlReader.Create(stream);
+                message = Message.CreateMessage(reader, maxSizeOfHeaders, MessageVersion);
             }
-            else if(contentType.ToLower().StartsWith("application/octet-stream"))
+            else if (contentType.ToLower().StartsWith("application/octet-stream"))
             {
-                return new MessageOctetStreamMessage()
+                message = new MessageOctetStreamMessage()
                 {
                     OctetStream = stream
                 };
@@ -162,30 +172,32 @@ namespace Boissonnot.Framework.Core.WebServices.Soap.SoapWithAttachments
                         "Invalid content type for reading message: {0}! Supported content types are multipart/related and text/xml!",
                         contentType));
             }
+
+            return message;
         }
 
         public override void WriteMessage(Message message, System.IO.Stream stream)
         {
             VerifyOperationContext();
 
-            message.Properties.Encoder = this._InnerEncoder;
+            message.Properties.Encoder = this._innerEncoder;
 
             byte[] Attachment = null;
-            if (OperationContext.Current.OutgoingMessageProperties.ContainsKey(SwaEncoderConstants.AttachmentProperty))
-                Attachment = (byte[])OperationContext.Current.OutgoingMessageProperties[SwaEncoderConstants.AttachmentProperty];
+            if (OperationContext.Current.OutgoingMessageProperties.ContainsKey(SwaEncoderConstants.ATTACHMENT_PROPERTY))
+                Attachment = (byte[])OperationContext.Current.OutgoingMessageProperties[SwaEncoderConstants.ATTACHMENT_PROPERTY];
 
             if (Attachment == null)
             {
-                _InnerEncoder.WriteMessage(message, stream);
+                _innerEncoder.WriteMessage(message, stream);
             }
             else
             {
                 // Associate the contents to the mime-part
-                _SoapMimeContent.Content = Encoding.UTF8.GetBytes(message.GetBody<string>());
-                _AttachmentMimeContent.Content = (byte[])OperationContext.Current.OutgoingMessageProperties[SwaEncoderConstants.AttachmentProperty];
+                _soapMimeContent.Content = Encoding.UTF8.GetBytes(message.GetBody<string>());
+                _attachmentMimeContent.Content = (byte[])OperationContext.Current.OutgoingMessageProperties[SwaEncoderConstants.ATTACHMENT_PROPERTY];
 
                 // Now create the message content for the stream
-                _MimeParser.SerializeMimeContent(_MyContent, stream);
+                _mimeParser.SerializeMimeContent(_myContent, stream);
             }
         }
 
@@ -193,24 +205,24 @@ namespace Boissonnot.Framework.Core.WebServices.Soap.SoapWithAttachments
         {
             VerifyOperationContext();
 
-            message.Properties.Encoder = this._InnerEncoder;
+            message.Properties.Encoder = this._innerEncoder;
 
             byte[] Attachment = null;
-            if (OperationContext.Current.OutgoingMessageProperties.ContainsKey(SwaEncoderConstants.AttachmentProperty))
-                Attachment = (byte[])OperationContext.Current.OutgoingMessageProperties[SwaEncoderConstants.AttachmentProperty];
+            if (OperationContext.Current.OutgoingMessageProperties.ContainsKey(SwaEncoderConstants.ATTACHMENT_PROPERTY))
+                Attachment = (byte[])OperationContext.Current.OutgoingMessageProperties[SwaEncoderConstants.ATTACHMENT_PROPERTY];
 
             if (Attachment == null)
             {
-                return _InnerEncoder.WriteMessage(message, maxMessageSize, bufferManager, messageOffset);
+                return _innerEncoder.WriteMessage(message, maxMessageSize, bufferManager, messageOffset);
             }
             else
             {
                 // Associate the contents to the mime-part
-                _SoapMimeContent.Content = Encoding.UTF8.GetBytes(message.ToString());
-                _AttachmentMimeContent.Content = (byte[])OperationContext.Current.OutgoingMessageProperties[SwaEncoderConstants.AttachmentProperty];
+                _soapMimeContent.Content = Encoding.UTF8.GetBytes(message.ToString());
+                _attachmentMimeContent.Content = (byte[])OperationContext.Current.OutgoingMessageProperties[SwaEncoderConstants.ATTACHMENT_PROPERTY];
 
                 // Now create the message content for the stream
-                byte[] MimeContentBytes = _MimeParser.SerializeMimeContent(_MyContent);
+                byte[] MimeContentBytes = _mimeParser.SerializeMimeContent(_myContent);
                 int MimeContentLength = MimeContentBytes.Length;
 
                 // Write the mime content into the section of the buffer passed into the method
@@ -233,18 +245,19 @@ namespace Boissonnot.Framework.Core.WebServices.Soap.SoapWithAttachments
                     "using(OperationScope Scope = new OperationScope(YourProxy.InnerChannel) { YouProxy.MethodCall(...); }"
                 );
             }
-            else if (OperationContext.Current.OutgoingMessageProperties.ContainsKey(SwaEncoderConstants.AttachmentProperty))
+            else if (OperationContext.Current.OutgoingMessageProperties.ContainsKey(SwaEncoderConstants.ATTACHMENT_PROPERTY))
             {
-                if (OperationContext.Current.OutgoingMessageProperties[SwaEncoderConstants.AttachmentProperty] != null)
+                if (OperationContext.Current.OutgoingMessageProperties[SwaEncoderConstants.ATTACHMENT_PROPERTY] != null)
                 {
-                    if (!(OperationContext.Current.OutgoingMessageProperties[SwaEncoderConstants.AttachmentProperty] is byte[]))
+                    if (!(OperationContext.Current.OutgoingMessageProperties[SwaEncoderConstants.ATTACHMENT_PROPERTY] is byte[]))
                     {
                         throw new ArgumentException(string.Format(
                             "OperationContext.Current.OutgoingMessageProperties[\"{0}\"] needs to be a byte[] array with the attachment content!",
-                                SwaEncoderConstants.AttachmentProperty));
+                                SwaEncoderConstants.ATTACHMENT_PROPERTY));
                     }
                 }
             }
         }
+        #endregion
     }
 }

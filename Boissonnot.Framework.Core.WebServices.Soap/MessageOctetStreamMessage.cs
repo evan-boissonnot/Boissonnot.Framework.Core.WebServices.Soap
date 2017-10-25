@@ -38,6 +38,11 @@ namespace Boissonnot.Framework.Core.WebServices.Soap.SoapWithAttachments
         /// Stream reçu en réponse
         /// </summary>
         public System.IO.Stream OctetStream { get; set; }
+
+        /// <summary>
+        /// Contenu xml
+        /// </summary>
+        public string ContentAsString { get; set; }
         #endregion
 
     }
