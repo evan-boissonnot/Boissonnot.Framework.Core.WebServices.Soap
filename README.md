@@ -1,2 +1,11 @@
 # Boissonnot.Framework.Core.WebServices.Soap
-Extension pour lire les attachments d'un message soap MTOM
+Read attachments in soap message response, with mtom messageEncoding.
+
+First use svutil from your wsdl webservice to generate proxy class.
+
+Example of using in Program.cs
+Config example in app.config
+
+
+
+
